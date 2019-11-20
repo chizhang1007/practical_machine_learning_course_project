@@ -1,0 +1,152 @@
+---
+title: "Practical Machine Learning Course Project"
+subtitle: "Making Prediction Using Different Machine Leanring Algorithms"
+author: "Chi Zhang"
+date: "11/18/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Wearable devices such as Apple Watch, Jawbone Up, Nike FuelBand, and Fitbit have enabled us to monitor and record our daily excercises and trainings. These devices collect a large amount of personal activity data to help people take measurements about themselves, understand their behavior, and improve their performance and physical health. The previous analysis on this type of data focused on quantify how to distinguish between different activities and how much of each acitivity people do. There is a lack in vaild models and algorithms to quantify how well people perform these activities. The target of this project is to build a model that can use data collected by those wearbale devices to predict and forcase the manner in which people do these activities.
+
+## Data source and information
+The data used for this project come from the website: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. The data contains training data for model development and 20 test data points for verifying the model's accuracy. 
+
+Six participants were asked to perform barbell lifts corretly and incorrelty in 5 different ways, which is the "classe" variable in the training data set. The accelerometers were placed on participants' belt, forearm, arm, and dumbell to collect movement data. 
+
+## Loading the data
+```{r, results='hide', message=FALSE, warning=FALSE}
+#set directory
+setwd("~/Documents/R Directory/Practical Machine Learning Project")
+
+#load useful packages
+library(caret)
+library(corrplot)
+library(rattle)
+library(rpart)
+
+#load data from the website
+train_data <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), header = TRUE)
+test_data <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"), header = TRUE)
+```
+
+## Exploring the data
+```{r}
+#explore the data
+dim(train_data)
+str(train_data)
+dim(test_data)
+str(test_data)
+```
+The analysis above shows two important aspects: (1) the first seven columns contain information on data identifiers that should not be included in the model; (2) both training and test datasets contain large number of columns with NA and empty values. So a cleaning step is needed to prepare the data for further processing.
+
+## Cleaning the data
+```{r}
+#clean the input training and test data to remove first seven columns
+train_data <- train_data[, -c(1:7)]
+test_data <- test_data[, -c(1:7)]
+
+#further clean the training and test data to remove columns with more than 90% NA or empty values
+columns_most_nas_train <- which(colSums(is.na(train_data) | train_data == "") > 0.9*dim(train_data)[1])
+if (length(columns_most_nas_train) != 0) {
+  train_data <- train_data[, -columns_most_nas_train]
+}
+columns_most_nas_test <- which(colSums(is.na(test_data) | test_data == "") > 0.9*dim(test_data)[1])
+if (length(columns_most_nas_test) != 0) {
+  test_data <- test_data[, -columns_most_nas_test]
+}
+dim(train_data)
+dim(test_data)
+```
+
+## Creating training and test sets from the training data
+In order to apply different machine learning algorithms, the training data needs to be partitioned into two parts, a training part, which contains 70% of the training data, and a testing part, which contains the rest 30% data.
+```{r}
+#creat partitions from the training data, 70% for modeling and 30% for cross validation
+train_partition <- createDataPartition(train_data$classe, p = 0.7, list = FALSE)
+train_set <- train_data[train_partition, ]
+test_set <- train_data[-train_partition, ]
+dim(train_set)
+dim(test_set)
+```
+
+## Checking correlations between variables
+Before we start the model development step, a correlation analysis is performed on 53 variables.
+```{r}
+#check the correlations between variables
+correlation_matrix <- cor(train_set[, -53])
+corrplot(correlation_matrix, method = "color", type = "upper", order = "FPC",
+         tl.cex = 0.5, tl.col = rgb(0,0,0))
+```
+The darker the color on the graph, the stronger the correlation between the two variables is.
+
+## Machine learning model selection and evaluation
+In this part of the report, three different machine learning algorithms, which are Decision Trees, Random Forest, and Stochastic Gradient Boosting Machine (GBM), are tested on the training data. A confusion matrix is generated for each model. The result will show the accuracy of each model on the test set. 
+
+## Model 1: Decision Trees
+```{r}
+#the first algorithm is Decision Trees
+traindata_decision_trees <- rpart(classe ~ ., data = train_set, method = "class")
+fancyRpartPlot(traindata_decision_trees)
+testdata_decision_trees <- predict(traindata_decision_trees, newdata = test_set, type = "class")
+confusion_matrix_decision_trees <- confusionMatrix(testdata_decision_trees, test_set$classe)
+confusion_matrix_decision_trees
+
+#plot the results from the matrix to show the accuracy of the Decision Trees algorithm
+plot(confusion_matrix_decision_trees$table, 
+     col = confusion_matrix_decision_trees$byClass, 
+     main = paste("Decision Tree's accuracy is", 
+                  round(confusion_matrix_decision_trees$overall['Accuracy'], 3)))
+round(confusion_matrix_decision_trees$overall['Accuracy'], 3)
+```
+
+## Model 2. Random Forest
+```{r}
+#the second algorithm is Random Forest
+random_forest_control <- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+traindata_random_forest <- train(classe ~ ., data = train_set, 
+                                 method = "rf", trControl = random_forest_control)
+traindata_random_forest$finalModel
+testdata_random_forest <- predict(traindata_random_forest, newdata = test_set)
+confusion_matrix_random_forest <- confusionMatrix(testdata_random_forest, test_set$classe)
+confusion_matrix_random_forest
+
+#plot the results from the matrix to show the accuracy of the Random Forest algorithm
+plot(confusion_matrix_random_forest$table, 
+     col = confusion_matrix_random_forest$byClass,
+     main = paste("Random Forest's accuracy is ", 
+                  round(confusion_matrix_random_forest$overall['Accuracy'], 3)))
+round(confusion_matrix_random_forest$overall['Accuracy'], 3)
+```
+
+## Model 3. GBM
+```{r}
+#the third algorithm is Stochastic Gradient Boosting Machine (GBM)
+GBM_control <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+traindata_GBM <- train(classe ~ ., data = train_set, method = "gbm", 
+                       trControl = GBM_control, verbose = FALSE)
+traindata_GBM$finalModel
+testdata_GBM <- predict(traindata_GBM, newdata = test_set)
+confusion_matrix_GBM <- confusionMatrix(testdata_GBM, test_set$classe)
+confusion_matrix_GBM
+
+#plot the results from the matrix to show the accuracy of the GBM algorithm
+plot(confusion_matrix_GBM$table, 
+     col = confusion_matrix_GBM$byClass, 
+     main = paste("GBM's accuracy is ", 
+                  round(confusion_matrix_GBM$overall['Accuracy'], 3)))
+round(confusion_matrix_GBM$overall['Accuracy'], 3)
+```
+
+Comparing all three models' accuracy values, it can be concluded that the Random Forest model is the most accurate model and will be applied to the test data to predict the "classe" results.
+
+## Applying the Random Forest model to the test data
+```{r}
+#the Random Forest has the highest accuracy, so apply the algorithm to the test data
+testdata_result <- predict(traindata_random_forest, newdata = test_data)
+testdata_result
+```
